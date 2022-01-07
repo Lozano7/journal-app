@@ -1,6 +1,7 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import Swal from 'sweetalert2';
 import { db } from '../firebase/firebase-config';
+import { fileUpload } from '../helpers/fileUpload';
 import loadNotes from '../helpers/loadNotes';
 export const startNewNote = createAsyncThunk(
   'note/startNewNote',
@@ -23,35 +24,28 @@ export const startNewNote = createAsyncThunk(
     );
   }
 );
-
-export const startUploading = createAsyncThunk(
-  'note/startUploading',
-  async (file, { dispatch, getState }) => {
-    console.log(file);
-    // const { uid } = getState().user;
-    // const note = getState().note.active;
-    // const fileName = `${uid}/${note.id}/${file.name}`;
-    // const fileRef = await db.ref(fileName);
-    // await fileRef.put(file);
-    // const url = await fileRef.getDownloadURL();
-    // dispatch(
-    //   noteActions.udpdateNote({
-    //     id: note.id,
-    //     url,
-    //   })
-    // );
+export const startDeleteNote = createAsyncThunk(
+  'note/deleteNote',
+  async (noteId, { dispatch, getState }) => {
+    const { uid } = getState().user;
+    await db.doc(`${uid}/journal/notes/${noteId}`).delete();
+    dispatch(noteActions.deleteNote(noteId));
   }
 );
 export const startSaveNote = createAsyncThunk(
   'note/startSaveNote',
   async (note, { dispatch, getState }) => {
     const { uid } = getState().user;
+    const { notes } = getState().note;
     const { id, ...noteData } = note;
     const noteToFirestore = { ...noteData };
     if (!noteToFirestore.url) delete noteToFirestore.url;
     try {
       await db.doc(`${uid}/journal/notes/${id}`).update(noteToFirestore);
       dispatch(noteActions.udpdateNote(note));
+      if (!notes.some((note) => note.id === id)) {
+        dispatch(noteActions.addNote(note));
+      }
       Swal.fire('Saved!', 'Your note has been saved', 'success');
     } catch (error) {
       Swal.fire({
@@ -62,6 +56,29 @@ export const startSaveNote = createAsyncThunk(
     }
   }
 );
+
+export const startUploading = createAsyncThunk(
+  'note/startUploading',
+  async (file, { dispatch, getState }) => {
+    const { active: activeNote } = getState().note;
+    Swal.fire({
+      title: 'Uploading...',
+      text: 'Please wait',
+      allowOutsideClick: false,
+      showConfirmButton: false,
+      willOpen: () => {
+        Swal.showLoading();
+      },
+    });
+    const fileUrl = await fileUpload(file);
+    const updateNote = { ...activeNote };
+    dispatch(noteActions.activeNote({ ...activeNote, url: fileUrl }));
+    updateNote.url = fileUrl;
+    dispatch(startSaveNote(updateNote));
+    Swal.close();
+  }
+);
+
 export const loadingNotes = createAsyncThunk(
   'note/loadingNotes',
   async ({ id }, { dispatch }) => {
@@ -91,6 +108,12 @@ const noteSlice = createSlice({
         notes: action.payload,
       };
     },
+    addNote: (state, action) => {
+      return {
+        ...state,
+        notes: [action.payload, ...state.notes],
+      };
+    },
     udpdateNote: (state, action) => {
       return {
         ...state,
@@ -100,6 +123,18 @@ const noteSlice = createSlice({
           }
           return note;
         }),
+      };
+    },
+    deleteNote: (state, action) => {
+      return {
+        active: null,
+        notes: state.notes.filter((note) => note.id !== action.payload),
+      };
+    },
+    logoutCleaning: (state) => {
+      return {
+        notes: [],
+        active: null,
       };
     },
   },
